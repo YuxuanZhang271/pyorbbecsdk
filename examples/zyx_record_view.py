@@ -70,6 +70,15 @@ def main(argv):
     pipeline.start(config)
     pipeline.start_recording(os.path.join(sub_path, "record.bag"))
 
+    camera_param = pipeline.get_camera_param()
+    print("Camera param: ", camera_param)
+
+    try: 
+        d2c = pipeline.get_d2c_valid_area(depth_profile, color_profile)
+        print("d2c: ", d2c)
+    except Exception as e: 
+        print(e)
+
     while True:
         try:
             frames: FrameSet = pipeline.wait_for_frames(100)
@@ -99,22 +108,21 @@ def main(argv):
             image = cv2.addWeighted(color_image, 0.5, depth_color_map, 0.5, 0)
             cv2.imshow("Viewer ", image)
 
-            camera_param = pipeline.get_camera_param()
-            points = frames.get_color_point_cloud(camera_param)
-            if len(points) == 0:
-                continue
-            points_np = np.asarray(points)
-            xyz = points_np[:, :3].astype(np.float32)
-            # Ensure colors are in the [0, 1] range for Open3D
-            colors = points_np[:, 3:].astype(np.uint8) / 255.0
+            # points = frames.get_color_point_cloud(camera_param)
+            # if len(points) == 0:
+            #     continue
+            # points_np = np.asarray(points)
+            # xyz = points_np[:, :3].astype(np.float32)
+            # # Ensure colors are in the [0, 1] range for Open3D
+            # colors = points_np[:, 3:].astype(np.uint8) / 255.0
 
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(xyz)
-            pcd.colors = o3d.utility.Vector3dVector(colors)
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(xyz)
+            # pcd.colors = o3d.utility.Vector3dVector(colors)
 
-            points_filename = os.path.join(pcd_path, f"{timestamp}.ply")
-            # Using binary format (write_ascii=False) tends to be faster.
-            o3d.io.write_point_cloud(points_filename, pcd, write_ascii=False)
+            # points_filename = os.path.join(pcd_path, f"{timestamp}.ply")
+            # # Using binary format (write_ascii=False) tends to be faster.
+            # o3d.io.write_point_cloud(points_filename, pcd, write_ascii=False)
 
             key = cv2.waitKey(1)
             if key == ord('q') or key == ESC_KEY:
