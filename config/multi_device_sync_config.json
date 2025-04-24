@@ -1,7 +1,7 @@
 {
     "devices": [
         {
-            "serial_number": "AY8783P0062",
+            "serial_number": "CL8K141005K",
             "config": {
                 "mode": "PRIMARY",
                 "depth_delay_us": 0,
@@ -13,7 +13,7 @@
             }
         },
         {
-            "serial_number": "AY8T43E0031",
+            "serial_number": "CL8K14100GF",
             "config": {
                 "mode": "SECONDARY",
                 "depth_delay_us": 0,

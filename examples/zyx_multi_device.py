@@ -1,5 +1,6 @@
 import cv2
 from datetime import datetime as dt
+import json
 import numpy as np
 import os
 from pyorbbecsdk import *
@@ -23,7 +24,43 @@ MAX_DEPTH = 10000  # 10000mm
 color_frames_queue: List[Queue] = [Queue() for _ in range(MAX_DEVICES)]
 depth_frames_queue: List[Queue] = [Queue() for _ in range(MAX_DEVICES)]
 stop_rendering = False
+multi_device_sync_config = {}
 
+config_file_path = os.path.join(
+    os.path.abspath(os.path.dirname(__file__)),
+    "../config/multi_device_sync_config.json",
+)
+
+
+def read_config(config_file: str):
+    global multi_device_sync_config
+    with open(config_file, "r") as f:
+        config = json.load(f)
+    for device in config["devices"]:
+        multi_device_sync_config[device["serial_number"]] = device
+        print(f"Device {device['serial_number']}: {device['config']['mode']}")
+
+
+def sync_mode_from_str(sync_mode_str: str) -> OBMultiDeviceSyncMode:
+    # to lower case
+    sync_mode_str = sync_mode_str.upper()
+    if sync_mode_str == "FREE_RUN":
+        return OBMultiDeviceSyncMode.FREE_RUN
+    elif sync_mode_str == "STANDALONE":
+        return OBMultiDeviceSyncMode.STANDALONE
+    elif sync_mode_str == "PRIMARY":
+        return OBMultiDeviceSyncMode.PRIMARY
+    elif sync_mode_str == "SECONDARY":
+        return OBMultiDeviceSyncMode.SECONDARY
+    elif sync_mode_str == "SECONDARY_SYNCED":
+        return OBMultiDeviceSyncMode.SECONDARY_SYNCED
+    elif sync_mode_str == "SOFTWARE_TRIGGERING":
+        return OBMultiDeviceSyncMode.SOFTWARE_TRIGGERING
+    elif sync_mode_str == "HARDWARE_TRIGGERING":
+        return OBMultiDeviceSyncMode.HARDWARE_TRIGGERING
+    else:
+        raise ValueError(f"Invalid sync mode: {sync_mode_str}")
+    
 
 def on_new_frame_callback(frames: FrameSet, index: int):
     global color_frames_queue, depth_frames_queue
@@ -74,6 +111,9 @@ def main():
     elif curr_device_cnt > MAX_DEVICES: 
         print("Too many device connected")
         return
+    
+    global config_file_path
+    read_config(config_file_path)
 
     pipelines: List[Pipeline] = []
     configs: List[Config] = []
@@ -85,6 +125,18 @@ def main():
         device = devices.get_device_by_index(i)
         pipeline = Pipeline(device)
         config = Config()
+
+        serial_number = device.get_device_info().get_serial_number()
+        sync_config_json = multi_device_sync_config[serial_number]
+        sync_config = device.get_multi_device_sync_config()
+        sync_config.mode = sync_mode_from_str(sync_config_json["config"]["mode"])
+        sync_config.color_delay_us = sync_config_json["config"]["color_delay_us"]
+        sync_config.depth_delay_us = sync_config_json["config"]["depth_delay_us"]
+        sync_config.trigger_out_enable = sync_config_json["config"]["trigger_out_enable"]
+        sync_config.trigger_out_delay_us = sync_config_json["config"]["trigger_out_delay_us"]
+        sync_config.frames_per_trigger = sync_config_json["config"]["frames_per_trigger"]
+        print(f"Device {serial_number} sync config: {sync_config}")
+        device.set_multi_device_sync_config(sync_config)
 
         device_path = os.path.join(sub_path, f"device{i}")
         os.makedirs(device_path, exist_ok=False)
@@ -127,6 +179,8 @@ def main():
     start_streams(pipelines, configs)
 
     try:
+        # start = [None] * curr_device_cnt
+        timestamp = 0
         while not stop_rendering:
             images = []
             for i in range(curr_device_cnt):
@@ -144,7 +198,10 @@ def main():
                 color_path = color_paths[i]
                 depth_path = depth_paths[i]
 
-                timestamp = color_frame.get_timestamp()
+                # timestamp = color_frame.get_timestamp()
+                # if start[i] is None: 
+                #     start[i] = timestamp
+                # timestamp -= start[i]
                 color_image = frame_to_bgr_image(color_frame)
                 cv2.imwrite(os.path.join(color_path, f"{timestamp}.png"), color_image)
 
@@ -169,6 +226,8 @@ def main():
 
             if not images: 
                 continue
+
+            timestamp += 1
             
             full_image = images[0].copy()
             for img in images[1:]:
