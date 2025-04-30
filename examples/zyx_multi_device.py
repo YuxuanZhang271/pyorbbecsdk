@@ -26,10 +26,17 @@ depth_frames_queue: List[Queue] = [Queue() for _ in range(MAX_DEVICES)]
 stop_rendering = False
 multi_device_sync_config = {}
 
+
 config_file_path = os.path.join(
     os.path.abspath(os.path.dirname(__file__)),
     "../config/multi_device_sync_config.json",
 )
+
+
+FONT = cv2.FONT_HERSHEY_SIMPLEX
+SCALE = 1
+THICKNESS = 2
+COLOR = (255, 255, 255)
 
 
 def read_config(config_file: str):
@@ -230,8 +237,11 @@ def main():
             timestamp += 1
             
             full_image = images[0].copy()
-            for img in images[1:]:
+            cv2.putText(full_image, 'device0', (10, 30), FONT, SCALE, COLOR, THICKNESS, cv2.LINE_AA)
+            for i, img in enumerate(images[1:], start=1):
+                cv2.putText(img, f'device{i}', (10, 30), FONT, SCALE, COLOR, THICKNESS, cv2.LINE_AA)
                 full_image = np.hstack((full_image, img))
+            full_image = cv2.resize(full_image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
             cv2.imshow("Devices", full_image)
 
             if stop_rendering: 
