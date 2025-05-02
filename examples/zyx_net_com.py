@@ -4,6 +4,7 @@ import argparse
 import datetime
 import time
 import math
+from zyx_multi_device import start_cameras
 
 def compute_start_second(received_time_iso: str, offset: float = 3.0) -> float:
     """Parse ISO time, add offset, then round up to next integer second (0–59)."""
@@ -30,6 +31,7 @@ def schedule_print(role: str, target_sec: float):
         print(f"[{role}] sleeping {wait:.3f}s until second {target_sec:.6f}")
         time.sleep(wait)
     print(f"[{role} START] {datetime.datetime.now().isoformat()}")
+    start_cameras()
 
 def run_server(port: int) -> float:
     """Wait for client, receive its time, compute/send start_sec, then return it."""
@@ -64,12 +66,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Synchronize a start time (seconds-only) between two devices."
     )
-    parser.add_argument("--mode", choices=["server", "client"], required=True,
-                        help="server waits; client initiates")
-    parser.add_argument("--host", default="127.0.0.1",
-                        help="server IP (client mode only)")
-    parser.add_argument("--port", type=int, default=12345,
-                        help="TCP port (default: 12345)")
+    parser.add_argument("-m", "--mode", choices=["server", "client"], required=True, help="server waits; client initiates")
+    parser.add_argument("-H", "--host", default="127.0.0.1", help="server IP (client mode only)")
+    parser.add_argument("-p", "--port", type=int, default=12345, help="TCP port (default: 12345)")
     args = parser.parse_args()
 
     if args.mode == "server":

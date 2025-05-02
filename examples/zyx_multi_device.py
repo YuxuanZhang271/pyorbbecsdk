@@ -99,7 +99,7 @@ def stop_streams(pipelines: List[Pipeline]):
         pipeline.stop()
 
 
-def main():
+def start_cameras():
     root_path = "./records"
     os.makedirs(root_path, exist_ok=True)
 
