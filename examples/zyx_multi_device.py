@@ -253,3 +253,7 @@ def start_cameras():
         stop_rendering = True
         stop_streams(pipelines)
         cv2.destroyAllWindows()
+
+
+if __name__ == '__main__': 
+    start_cameras()
