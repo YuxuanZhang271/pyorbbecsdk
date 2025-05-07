@@ -146,7 +146,7 @@ def start_cameras(target_sec: float):
     root_path = "./records"
     os.makedirs(root_path, exist_ok=True)
 
-    now = dt.now()
+    now = dt.datetime.now()
     data_time = now.strftime("%Y%m%d%H%M%S")
     sub_path = os.path.join(root_path, data_time)
     os.makedirs(sub_path, exist_ok=False)
