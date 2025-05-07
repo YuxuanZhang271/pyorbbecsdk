@@ -331,7 +331,7 @@ if __name__ == "__main__":
 
     if args.mode == "server":
         start_sec = run_server(args.port)
-        start_cameras("SERVER", start_sec)
+        start_cameras(start_sec)
     else:
         start_sec = run_client(args.host, args.port)
-        start_cameras("CLIENT", start_sec)
+        start_cameras(start_sec)
