@@ -20,18 +20,15 @@ ESC_KEY = 27
 MIN_DEPTH = 20  # 20mm
 MAX_DEPTH = 10000  # 10000mm
 
-
 color_frames_queue: List[Queue] = [Queue() for _ in range(MAX_DEVICES)]
 depth_frames_queue: List[Queue] = [Queue() for _ in range(MAX_DEVICES)]
 stop_rendering = False
 multi_device_sync_config = {}
 
-
 config_file_path = os.path.join(
     os.path.abspath(os.path.dirname(__file__)),
     "../config/multi_device_sync_config.json",
 )
-
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 SCALE = 1
