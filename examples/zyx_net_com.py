@@ -43,8 +43,8 @@ COLOR = (255, 255, 255)
 
 def compute_start_second(received_time_iso: str, offset: float = 10.0) -> float:
     """Parse ISO time, add offset, then round up to next integer second (0–59)."""
-    dt = dt.datetime.fromisoformat(received_time_iso)
-    secs = dt.second + dt.microsecond / 1e6
+    dati = dt.datetime.fromisoformat(received_time_iso)
+    secs = dati.second + dati.microsecond / 1e6
     raw = secs + offset
     # wrap around minute
     start_sec = math.ceil(raw) % 60
