@@ -227,6 +227,8 @@ def start_cameras(target_sec: float):
     
     global stop_rendering
 
+    start_streams(pipelines, configs)
+
     now = dt.datetime.now()
     cur = now.second + now.microsecond / 1e6
 
@@ -247,8 +249,6 @@ def start_cameras(target_sec: float):
         remaining -= sleep_duration
 
     print(f"[START] {dt.datetime.now().isoformat()}")
-
-    start_streams(pipelines, configs)
 
     try:
         # start = [None] * curr_device_cnt
