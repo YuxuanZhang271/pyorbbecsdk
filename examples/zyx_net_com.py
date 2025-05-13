@@ -229,24 +229,9 @@ def start_cameras(target_sec: float):
 
     start_streams(pipelines, configs)
 
-    now = dt.datetime.now()
-    cur = now.second + now.microsecond / 1e6
-
-    # Compute total wait time until the next target_sec
-    if target_sec >= cur:
-        total_wait = target_sec - cur
-    else:
-        total_wait = (60 - cur) + target_sec
-
-    # Countdown loop, printing every second (or final fractional remainder)
-    remaining = total_wait
-    while remaining > 0:
-        # Print remaining time, rounded to 3 decimal places
-        print(f"[Recording will start in {remaining:.3f}s...")
-        # Sleep up to 1 second, or the remaining time if less
-        sleep_duration = min(1.0, remaining)
-        time.sleep(sleep_duration)
-        remaining -= sleep_duration
+    wait = target_sec - dt.datetime.now().timestamp()  
+    if wait > 0:
+        time.sleep(wait)
 
     print(f"[START] {dt.datetime.now().isoformat()}")
 
