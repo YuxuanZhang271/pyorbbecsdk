@@ -229,11 +229,11 @@ def start_cameras(target_sec: float):
 
     start_streams(pipelines, configs)
 
-    wait = target_sec - dt.datetime.now().timestamp()  
+    wait = target_sec + 5.0 - dt.datetime.now().timestamp()  
     if wait > 0:
         time.sleep(wait)
 
-    print(f"[START] {dt.datetime.now().isoformat()}")
+    # print(f"[START] {dt.datetime.now().isoformat()}")
 
     try:
         # start = [None] * curr_device_cnt
