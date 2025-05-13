@@ -194,7 +194,7 @@ def start_cameras(target_sec: float):
         try: 
             profile_list = pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
             assert profile_list is not None
-            color_profile = profile_list.get_default_video_stream_profile()
+            color_profile = profile_list.get_video_stream_profile(1920, 1080, OBFormat.MJPG, 15)
             assert color_profile is not None
             config.enable_stream(color_profile)
 
@@ -204,7 +204,7 @@ def start_cameras(target_sec: float):
 
             profile_list = pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
             assert profile_list is not None
-            depth_profile = profile_list.get_default_video_stream_profile()
+            depth_profile = profile_list.get_video_stream_profile(640, 576, OBFormat.Y16, 15)
             assert depth_profile is not None
             config.enable_stream(depth_profile)
 
