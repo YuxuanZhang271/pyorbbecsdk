@@ -105,6 +105,8 @@ def main(argv):
             depth_data = depth_data.astype(np.float32) * scale
             depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
             depth_image = cv2.applyColorMap(depth_image, cv2.COLORMAP_JET)
+            print(color_image.shape)
+            print(depth_image.shape)
             # overlay color image on depth image
             depth_image = cv2.addWeighted(color_image, 0.5, depth_image, 0.5, 0)
             cv2.imshow("SyncAlignViewer ", depth_image)
