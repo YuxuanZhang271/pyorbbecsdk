@@ -9,6 +9,12 @@ import sys
 from typing import List
 from utils import frame_to_bgr_image
 
+# import threading
+from threading import Thread
+import time
+# import psutil
+# import subprocess
+
 
 MAX_DEVICES = 2
 curr_device_cnt = 0
@@ -34,6 +40,44 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 SCALE = 1
 THICKNESS = 2
 COLOR = (255, 255, 255)
+
+
+save_queue = Queue()
+def async_saver():
+    while True:
+        try:
+            item = save_queue.get(timeout=1)
+            if item is None:
+                break
+            color_img, color_path, depth_arr, depth_path = item
+            try:
+                cv2.imwrite(color_path, color_img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                depth_arr.tofile(depth_path)
+            except Exception as e:
+                print(f"[AsyncSaver] Save failed: {e}")
+            save_queue.task_done()
+        except:
+            if stop_rendering:
+                break
+
+
+# def monitor_cpu_usage(interval=5):
+#     while not stop_rendering:
+#         cpu = psutil.cpu_percent(interval=interval)
+#         mem = psutil.virtual_memory().percent
+#         print(f"[Monitor] CPU Usage: {cpu:.1f}%, Memory Usage: {mem:.1f}%")
+
+
+# def monitor_usb_bandwidth(interval=5):
+#     while not stop_rendering:
+#         try:
+#             # Uses lsusb -t to print USB topology
+#             print("[Monitor] USB bus usage snapshot:")
+#             output = subprocess.check_output("lsusb -t", shell=True).decode()
+#             print(output)
+#         except Exception as e:
+#             print(f"[Monitor] USB monitor error: {e}")
+#         time.sleep(interval)
 
 
 def read_config(config_file: str):
@@ -148,7 +192,7 @@ def start_cameras():
         try: 
             profile_list = pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
             assert profile_list is not None
-            color_profile = profile_list.get_default_video_stream_profile()
+            color_profile = profile_list.get_video_stream_profile(1920, 1080, OBFormat.MJPG, 15)
             assert color_profile is not None
             config.enable_stream(color_profile)
 
@@ -158,7 +202,7 @@ def start_cameras():
 
             profile_list = pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
             assert profile_list is not None
-            depth_profile = profile_list.get_default_video_stream_profile()
+            depth_profile = profile_list.get_video_stream_profile(640, 576, OBFormat.Y16, 15)
             assert depth_profile is not None
             config.enable_stream(depth_profile)
 
@@ -180,12 +224,20 @@ def start_cameras():
         configs.append(config)
     
     global stop_rendering
+
+    # threading.Thread(target=monitor_cpu_usage, daemon=True).start()
+    # threading.Thread(target=monitor_usb_bandwidth, daemon=True).start()
+
     start_streams(pipelines, configs)
+    Thread(target=async_saver, daemon=True).start()
 
     try:
-        # start = [None] * curr_device_cnt
-        timestamp = 0
+        start = [None] * curr_device_cnt
+        # last_ts = [None] * curr_device_cnt
+        idx = 0
         while not stop_rendering:
+            loop_start = time.perf_counter()
+
             images = []
             for i in range(curr_device_cnt):
                 color_frame = None
@@ -202,12 +254,15 @@ def start_cameras():
                 color_path = color_paths[i]
                 depth_path = depth_paths[i]
 
-                # timestamp = color_frame.get_timestamp()
-                # if start[i] is None: 
-                #     start[i] = timestamp
-                # timestamp -= start[i]
+                timestamp = color_frame.get_timestamp()
+                if start[i] is None: 
+                    start[i] = timestamp
+                timestamp -= start[i]
+                # if last_ts[i] is not None:
+                #     print(f"[Camera {i}] Δtimestamp: {timestamp - last_ts[i]:.2f} ms")
+                # last_ts[i] = timestamp
+
                 color_image = frame_to_bgr_image(color_frame)
-                cv2.imwrite(os.path.join(color_path, f"{timestamp}.png"), color_image)
 
                 width = depth_frame.get_width()
                 height = depth_frame.get_height()
@@ -215,7 +270,9 @@ def start_cameras():
                 depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
                 depth_data = depth_data.reshape((height, width))
                 depth_data = depth_data.astype(np.float32) * scale
-                depth_data.tofile(os.path.join(depth_path, f"{timestamp}.raw"))
+                color_file = os.path.join(color_path, f"{idx}_{timestamp}.jpg")
+                depth_file = os.path.join(depth_path, f"{idx}_{timestamp}.raw")
+                save_queue.put((color_image, color_file, depth_data, depth_file))
 
                 depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
                 depth_image = cv2.applyColorMap(depth_image, cv2.COLORMAP_JET)
@@ -231,7 +288,7 @@ def start_cameras():
             if not images: 
                 continue
 
-            timestamp += 1
+            idx += 1
             
             full_image = images[0].copy()
             cv2.putText(full_image, 'device0', (10, 30), FONT, SCALE, COLOR, THICKNESS, cv2.LINE_AA)
@@ -241,14 +298,24 @@ def start_cameras():
             full_image = cv2.resize(full_image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
             cv2.imshow("Devices", full_image)
 
+            print(f"[Loop] Total time: {(time.perf_counter() - loop_start)*1e3:.1f} ms")
+
             if stop_rendering: 
                 break
 
         stop_streams(pipelines)
+
+        save_queue.put(None)
+        save_queue.join()
+
         cv2.destroyAllWindows()
     except KeyboardInterrupt:
         stop_rendering = True
         stop_streams(pipelines)
+
+        save_queue.put(None)
+        save_queue.join()
+
         cv2.destroyAllWindows()
 
 
