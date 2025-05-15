@@ -1,114 +1,38 @@
-import cv2
-from datetime import datetime as dt
-import json
-import numpy as np
-import os
-from pyorbbecsdk import *
+# ******************************************************************************
+#  Copyright (c) 2023 Orbbec 3D Technology, Inc
+#  
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.  
+#  You may obtain a copy of the License at
+#  
+#      http:# www.apache.org/licenses/LICENSE-2.0
+#  
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+# ******************************************************************************
 from queue import Queue
-import sys
 from typing import List
+
+import cv2
+import numpy as np
+
+from pyorbbecsdk import *
 from utils import frame_to_bgr_image
-
-# import threading
-from threading import Thread
-import time
-# import psutil
-# import subprocess
-
 
 MAX_DEVICES = 2
 curr_device_cnt = 0
 
 MAX_QUEUE_SIZE = 5
-
 ESC_KEY = 27
-
-MIN_DEPTH = 20  # 20mm
-MAX_DEPTH = 10000  # 10000mm
 
 color_frames_queue: List[Queue] = [Queue() for _ in range(MAX_DEVICES)]
 depth_frames_queue: List[Queue] = [Queue() for _ in range(MAX_DEVICES)]
+has_color_sensor: List[bool] = [False for _ in range(MAX_DEVICES)]
 stop_rendering = False
-multi_device_sync_config = {}
 
-config_file_path = os.path.join(
-    os.path.abspath(os.path.dirname(__file__)),
-    "../config/multi_device_sync_config.json",
-)
-
-FONT = cv2.FONT_HERSHEY_SIMPLEX
-SCALE = 1
-THICKNESS = 2
-COLOR = (255, 255, 255)
-
-
-save_queue = Queue()
-def async_saver():
-    while True:
-        try:
-            item = save_queue.get(timeout=1)
-            if item is None:
-                break
-            color_img, color_path, depth_arr, depth_path = item
-            try:
-                cv2.imwrite(color_path, color_img, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                depth_arr.tofile(depth_path)
-            except Exception as e:
-                print(f"[AsyncSaver] Save failed: {e}")
-            save_queue.task_done()
-        except:
-            if stop_rendering:
-                break
-
-
-# def monitor_cpu_usage(interval=5):
-#     while not stop_rendering:
-#         cpu = psutil.cpu_percent(interval=interval)
-#         mem = psutil.virtual_memory().percent
-#         print(f"[Monitor] CPU Usage: {cpu:.1f}%, Memory Usage: {mem:.1f}%")
-
-
-# def monitor_usb_bandwidth(interval=5):
-#     while not stop_rendering:
-#         try:
-#             # Uses lsusb -t to print USB topology
-#             print("[Monitor] USB bus usage snapshot:")
-#             output = subprocess.check_output("lsusb -t", shell=True).decode()
-#             print(output)
-#         except Exception as e:
-#             print(f"[Monitor] USB monitor error: {e}")
-#         time.sleep(interval)
-
-
-def read_config(config_file: str):
-    global multi_device_sync_config
-    with open(config_file, "r") as f:
-        config = json.load(f)
-    for device in config["devices"]:
-        multi_device_sync_config[device["serial_number"]] = device
-        print(f"Device {device['serial_number']}: {device['config']['mode']}")
-
-
-def sync_mode_from_str(sync_mode_str: str) -> OBMultiDeviceSyncMode:
-    # to lower case
-    sync_mode_str = sync_mode_str.upper()
-    if sync_mode_str == "FREE_RUN":
-        return OBMultiDeviceSyncMode.FREE_RUN
-    elif sync_mode_str == "STANDALONE":
-        return OBMultiDeviceSyncMode.STANDALONE
-    elif sync_mode_str == "PRIMARY":
-        return OBMultiDeviceSyncMode.PRIMARY
-    elif sync_mode_str == "SECONDARY":
-        return OBMultiDeviceSyncMode.SECONDARY
-    elif sync_mode_str == "SECONDARY_SYNCED":
-        return OBMultiDeviceSyncMode.SECONDARY_SYNCED
-    elif sync_mode_str == "SOFTWARE_TRIGGERING":
-        return OBMultiDeviceSyncMode.SOFTWARE_TRIGGERING
-    elif sync_mode_str == "HARDWARE_TRIGGERING":
-        return OBMultiDeviceSyncMode.HARDWARE_TRIGGERING
-    else:
-        raise ValueError(f"Invalid sync mode: {sync_mode_str}")
-    
 
 def on_new_frame_callback(frames: FrameSet, index: int):
     global color_frames_queue, depth_frames_queue
@@ -126,12 +50,67 @@ def on_new_frame_callback(frames: FrameSet, index: int):
         depth_frames_queue[index].put(depth_frame)
 
 
+def rendering_frames():
+    global color_frames_queue, depth_frames_queue
+    global curr_device_cnt
+    global stop_rendering
+    while not stop_rendering:
+        full_image = None
+        for i in range(curr_device_cnt):
+            color_frame = None
+            depth_frame = None
+            if not color_frames_queue[i].empty():
+                color_frame = color_frames_queue[i].get()
+            if not depth_frames_queue[i].empty():
+                depth_frame = depth_frames_queue[i].get()
+            if color_frame is None and depth_frame is None:
+                continue
+            color_image = None
+            depth_image = None
+            color_width, color_height = 0, 0
+            if color_frame is not None:
+                color_width, color_height = color_frame.get_width(), color_frame.get_height()
+                color_image = frame_to_bgr_image(color_frame)
+            if depth_frame is not None:
+                width = depth_frame.get_width()
+                height = depth_frame.get_height()
+                scale = depth_frame.get_depth_scale()
+
+                depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
+                depth_data = depth_data.reshape((height, width))
+
+                depth_data = depth_data.astype(np.float32) * scale
+
+                depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX,
+                                            dtype=cv2.CV_8U)
+                depth_image = cv2.applyColorMap(depth_image, cv2.COLORMAP_JET)
+
+            if color_image is not None and depth_image is not None:
+                window_size = (color_width // 2, color_height // 2)
+                color_image = cv2.resize(color_image, window_size)
+                depth_image = cv2.resize(depth_image, window_size)
+                image = np.hstack((color_image, depth_image))
+            elif depth_image is not None and not has_color_sensor[i]:
+                image = depth_image
+            else:
+                continue
+            if full_image is None: 
+                full_image = image
+            else: 
+                full_image = np.vstack((full_image, image))
+        if full_image is not None: 
+            cv2.imshow("Devices", full_image)
+        key = cv2.waitKey(1)
+        if key == ord('q') or key == ESC_KEY:
+            return
+
+
 def start_streams(pipelines: List[Pipeline], configs: List[Config]):
     index = 0
     for pipeline, config in zip(pipelines, configs):
-        print(f"Starting device {index}")
-        pipeline.start(config, lambda frame_set, 
-                       curr_index=index: on_new_frame_callback(frame_set, curr_index))
+        print("Starting device {}".format(index))
+        pipeline.start(config, lambda frame_set, curr_index=index: on_new_frame_callback(frame_set,
+                                                                                         curr_index))
         index += 1
 
 
@@ -140,184 +119,48 @@ def stop_streams(pipelines: List[Pipeline]):
         pipeline.stop()
 
 
-def start_cameras():
-    root_path = "./records"
-    os.makedirs(root_path, exist_ok=True)
-
-    now = dt.now()
-    data_time = now.strftime("%Y%m%d%H%M%S")
-    sub_path = os.path.join(root_path, data_time)
-    os.makedirs(sub_path, exist_ok=False)
-
+def main():
     ctx = Context()
-    devices = ctx.query_devices()
+    device_list = ctx.query_devices()
     global curr_device_cnt
-    curr_device_cnt = devices.get_count()
-    if curr_device_cnt <= 0: 
+    curr_device_cnt = device_list.get_count()
+    if curr_device_cnt == 0:
         print("No device connected")
         return
-    elif curr_device_cnt > MAX_DEVICES: 
-        print("Too many device connected")
+    if curr_device_cnt > MAX_DEVICES:
+        print("Too many devices connected")
         return
-    
-    global config_file_path
-    read_config(config_file_path)
-
     pipelines: List[Pipeline] = []
     configs: List[Config] = []
-
-    color_paths = []
-    depth_paths = []
-
-    for i in range(curr_device_cnt): 
-        device = devices.get_device_by_index(i)
+    global has_color_sensor
+    for i in range(device_list.get_count()):
+        device = device_list.get_device_by_index(i)
         pipeline = Pipeline(device)
         config = Config()
-
-        serial_number = device.get_device_info().get_serial_number()
-        sync_config_json = multi_device_sync_config[serial_number]
-        sync_config = device.get_multi_device_sync_config()
-        sync_config.mode = sync_mode_from_str(sync_config_json["config"]["mode"])
-        sync_config.color_delay_us = sync_config_json["config"]["color_delay_us"]
-        sync_config.depth_delay_us = sync_config_json["config"]["depth_delay_us"]
-        sync_config.trigger_out_enable = sync_config_json["config"]["trigger_out_enable"]
-        sync_config.trigger_out_delay_us = sync_config_json["config"]["trigger_out_delay_us"]
-        sync_config.frames_per_trigger = sync_config_json["config"]["frames_per_trigger"]
-        print(f"Device {serial_number} sync config: {sync_config}")
-        device.set_multi_device_sync_config(sync_config)
-
-        device_path = os.path.join(sub_path, f"device{i}")
-        os.makedirs(device_path, exist_ok=False)
-
-        try: 
-            profile_list = pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
-            assert profile_list is not None
-            color_profile = profile_list.get_video_stream_profile(1920, 1080, OBFormat.MJPG, 15)
-            assert color_profile is not None
-            config.enable_stream(color_profile)
-
-            color_path = os.path.join(device_path, "color_images")
-            os.makedirs(color_path, exist_ok=False)
-            color_paths.append(color_path)
-
-            profile_list = pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
-            assert profile_list is not None
-            depth_profile = profile_list.get_video_stream_profile(640, 576, OBFormat.Y16, 15)
-            assert depth_profile is not None
-            config.enable_stream(depth_profile)
-
-            depth_path = os.path.join(device_path, "depth_images")
-            os.makedirs(depth_path, exist_ok=False)
-            depth_paths.append(depth_path)
-
-        except Exception as e:
-            print(e)
-            return
-        
-        config.set_align_mode(OBAlignMode.SW_MODE)
         try:
-            pipeline.enable_frame_sync()
-        except Exception as e:
+            profile_list = pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
+            color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(1080, 720, OBFormat.MJPG, 15)
+            # color_profile: VideoStreamProfile = profile_list.get_default_video_stream_profile()
+            config.enable_stream(color_profile)
+            has_color_sensor[i] = True
+        except OBError as e:
             print(e)
-        
+            has_color_sensor[i] = False
+        profile_list = pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
+        depth_profile = profile_list.get_default_video_stream_profile()
+        config.enable_stream(depth_profile)
+        config.enable_stream(depth_profile)
         pipelines.append(pipeline)
         configs.append(config)
-    
     global stop_rendering
-
-    # threading.Thread(target=monitor_cpu_usage, daemon=True).start()
-    # threading.Thread(target=monitor_usb_bandwidth, daemon=True).start()
-
     start_streams(pipelines, configs)
-    Thread(target=async_saver, daemon=True).start()
-
     try:
-        start = [None] * curr_device_cnt
-        # last_ts = [None] * curr_device_cnt
-        idx = 0
-        while not stop_rendering:
-            loop_start = time.perf_counter()
-
-            images = []
-            for i in range(curr_device_cnt):
-                color_frame = None
-                depth_frame = None
-                if not color_frames_queue[i].empty():
-                    color_frame = color_frames_queue[i].get()
-                if not depth_frames_queue[i].empty():
-                    depth_frame = depth_frames_queue[i].get()
-                if color_frame is None or depth_frame is None:
-                    continue
-
-                color_image = None
-                depth_image = None
-                color_path = color_paths[i]
-                depth_path = depth_paths[i]
-
-                timestamp = color_frame.get_timestamp()
-                if start[i] is None: 
-                    start[i] = timestamp
-                timestamp -= start[i]
-                # if last_ts[i] is not None:
-                #     print(f"[Camera {i}] Δtimestamp: {timestamp - last_ts[i]:.2f} ms")
-                # last_ts[i] = timestamp
-
-                color_image = frame_to_bgr_image(color_frame)
-
-                width = depth_frame.get_width()
-                height = depth_frame.get_height()
-                scale = depth_frame.get_depth_scale()
-                depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
-                depth_data = depth_data.reshape((height, width))
-                depth_data = depth_data.astype(np.float32) * scale
-                color_file = os.path.join(color_path, f"{idx}_{timestamp}.jpg")
-                depth_file = os.path.join(depth_path, f"{idx}_{timestamp}.raw")
-                save_queue.put((color_image, color_file, depth_data, depth_file))
-
-                depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-                depth_image = cv2.applyColorMap(depth_image, cv2.COLORMAP_JET)
-
-                image = cv2.addWeighted(color_image, 0.5, depth_image, 0.5, 0)
-                images.append(image)
-
-                key = cv2.waitKey(1)
-                if key == ord('q') or key == ESC_KEY:
-                    stop_rendering = True
-                    break
-
-            if not images: 
-                continue
-
-            idx += 1
-            
-            full_image = images[0].copy()
-            cv2.putText(full_image, 'device0', (10, 30), FONT, SCALE, COLOR, THICKNESS, cv2.LINE_AA)
-            for i, img in enumerate(images[1:], start=1):
-                cv2.putText(img, f'device{i}', (10, 30), FONT, SCALE, COLOR, THICKNESS, cv2.LINE_AA)
-                full_image = np.hstack((full_image, img))
-            full_image = cv2.resize(full_image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
-            cv2.imshow("Devices", full_image)
-
-            print(f"[Loop] Total time: {(time.perf_counter() - loop_start)*1e3:.1f} ms")
-
-            if stop_rendering: 
-                break
-
+        rendering_frames()
         stop_streams(pipelines)
-
-        save_queue.put(None)
-        save_queue.join()
-
-        cv2.destroyAllWindows()
     except KeyboardInterrupt:
         stop_rendering = True
         stop_streams(pipelines)
 
-        save_queue.put(None)
-        save_queue.join()
 
-        cv2.destroyAllWindows()
-
-
-if __name__ == '__main__': 
-    start_cameras()
+if __name__ == "__main__":
+    main()
