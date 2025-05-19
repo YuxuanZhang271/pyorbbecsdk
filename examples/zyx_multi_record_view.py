@@ -4,6 +4,7 @@ from typing import List
 import cv2
 import numpy as np
 import os
+import datetime as dt
 
 from pyorbbecsdk import *
 from utils import frame_to_bgr_image
@@ -90,12 +91,14 @@ def rendering_frames():
 
 def start_streams(pipelines: List[Pipeline], configs: List[Config]):
     os.makedirs('record', exist_ok=True)
+    time = dt.datetime.now().strftime("%Y%m%d%H%M%S")
+    os.makedirs(os.path.join('record', time), exist_ok=True)
     index = 0
     for pipeline, config in zip(pipelines, configs):
         print("Starting device {}".format(index))
         pipeline.start(config, lambda frame_set, curr_index=index: on_new_frame_callback(frame_set,
                                                                                          curr_index))
-        pipeline.start_recording(f"record/test_{index}.bag")
+        pipeline.start_recording(f"record/{time}/test_{index}.bag")
         index += 1
 
 
